@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>제주 미세먼지</title>
+  <style>
+    :root{
+      --bg:#f3f7fb; --card:#fff; --ink:#18232f; --sub:#6a7a89; --line:#e2e9f0;
+      --g1:#2f80ed; --g2:#27ae60; --g3:#f2994a; --g4:#eb5757; --gx:#b4bfca;
+    }
+    *{box-sizing:border-box}
+    body{margin:0;font-family:"Pretendard","Apple SD Gothic Neo","Malgun Gothic",sans-serif;
+      background:var(--bg);color:var(--ink)}
+    header{background:linear-gradient(135deg,#4facfe,#2f80ed 55%,#1c5fcf);color:#fff;
+      padding:40px 20px 70px;text-align:center}
+    header h1{margin:0 0 8px;font-size:clamp(26px,5vw,36px);letter-spacing:-.5px}
+    header p{margin:0;opacity:.92;font-size:14.5px}
+    main{max-width:1040px;margin:-44px auto 50px;padding:0 16px}
+
+    .summary{background:var(--card);border:1px solid var(--line);border-radius:20px;
+      padding:20px;box-shadow:0 8px 24px rgba(20,60,120,.08);
+      display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));text-align:center}
+    .summary .k{font-size:12.5px;color:var(--sub);margin-bottom:6px}
+    .summary .v{font-size:30px;font-weight:800}
+    .summary .v small{font-size:13px;font-weight:600;color:var(--sub);margin-left:3px}
+    .pill{display:inline-block;padding:3px 10px;border-radius:999px;font-size:12px;
+      font-weight:700;color:#fff}
+    .tools{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:18px 2px 0}
+    .chip{border:1px solid var(--line);background:#fff;padding:7px 14px;border-radius:999px;
+      font-size:13.5px;cursor:pointer;color:var(--ink);transition:.15s}
+    .chip.on{background:var(--g1);border-color:var(--g1);color:#fff}
+    .btn{margin-left:auto;background:#fff;border:1px solid var(--line);border-radius:10px;
+      padding:7px 14px;font-size:13px;cursor:pointer}
+    .btn:hover{border-color:var(--g1);color:var(--g1)}
+
+    .grid{display:grid;gap:14px;margin-top:16px;
+      grid-template-columns:repeat(auto-fill,minmax(235px,1fr))}
+    .card{background:var(--card);border:1px solid var(--line);border-radius:18px;
+      padding:18px;position:relative;overflow:hidden;transition:.18s}
+    .card:hover{transform:translateY(-3px);box-shadow:0 12px 26px rgba(20,60,120,.12)}
+    .card::before{content:"";position:absolute;left:0;top:0;bottom:0;width:6px;
+      background:var(--c,var(--gx))}
+    .top{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+    .name{font-weight:800;font-size:17px}
+    .two{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+    .m{background:#f7fafc;border-radius:12px;padding:10px 12px}
+    .m .l{font-size:12px;color:var(--sub)}
+    .m .n{font-size:26px;font-weight:800;line-height:1.2}
+    .m .n small{font-size:11px;font-weight:600;color:var(--sub);margin-left:2px}
+    .bar{height:6px;border-radius:6px;background:#e8eef4;margin-top:6px;overflow:hidden}
+    .bar i{display:block;height:100%;border-radius:6px}
+    .sub{margin-top:12px;display:flex;gap:10px;flex-wrap:wrap;font-size:12px;color:var(--sub)}
+    .time{margin-top:10px;font-size:11.5px;color:var(--sub)}
+    .state{text-align:center;color:var(--sub);padding:60px 0}
+    .err{background:#fff4f2;border:1px solid #ffd2cb;color:#b3261e;border-radius:14px;
+      padding:18px;margin-top:18px;line-height:1.6}
+    .err code{background:#ffe6e1;padding:1px 6px;border-radius:6px}
+    footer{text-align:center;color:var(--sub);font-size:12px;padding:0 0 30px}
+  </style>
+</head>
+<body>
+  <header>
+    <h1>🌫️ 제주 미세먼지</h1>
+    <p>한국환경공단 에어코리아 실시간 측정 정보</p>
+  </header>
+
+  <main>
+    <section class="summary" id="summary"></section>
+    <div class="tools" id="tools"></div>
+    <div id="view" class="state">불러오는 중…</div>
+  </main>
+
+  <footer>API: <span id="base"></span> · <span id="dbstate"></span></footer>
+
+  <script>
+    // 배포할 때는 이 한 줄만 Railway 주소로 바꾼다
+    const API_BASE = "http://127.0.0.1:8000";
+    document.getElementById("base").textContent = API_BASE;
+
+    const $ = id => document.getElementById(id);
+    const GRADE = {
+      1: {t: "좋음", c: "var(--g1)"}, 2: {t: "보통", c: "var(--g2)"},
+      3: {t: "나쁨", c: "var(--g3)"}, 4: {t: "매우나쁨", c: "var(--g4)"},
+    };
+    const g = n => GRADE[n] || {t: "점검중", c: "var(--gx)"};
+    const fmt = v => v == null ? "-" : v;
+    // 환경부 기준 최대치(막대 길이용): PM10 150, PM2.5 75
+    const pct = (v, max) => v == null ? 0 : Math.min(100, Math.round(v / max * 100));
+
+    let rows = [], sortBy = "name";
+
+    function summary() {
+      const ok10 = rows.filter(r => r.pm10 != null), ok25 = rows.filter(r => r.pm25 != null);
+      const avg = a => a.length ? Math.round(a.reduce((s, r) => s + r.v, 0) / a.length) : null;
+      const a10 = avg(ok10.map(r => ({v: r.pm10}))), a25 = avg(ok25.map(r => ({v: r.pm25}))),
+      worst = [...rows].filter(r => r.pm10 != null).sort((a, b) => b.pm10 - a.pm10)[0];
+      const lv10 = a10 == null ? 0 : a10 <= 30 ? 1 : a10 <= 80 ? 2 : a10 <= 150 ? 3 : 4;
+      const lv25 = a25 == null ? 0 : a25 <= 15 ? 1 : a25 <= 35 ? 2 : a25 <= 75 ? 3 : 4;
+      $("summary").innerHTML = `
+        <div><div class="k">미세먼지 평균 (PM10)</div>
+          <div class="v" style="color:${g(lv10).c}">${fmt(a10)}<small>㎍/㎥</small></div>
+          <span class="pill" style="background:${g(lv10).c}">${g(lv10).t}</span></div>
+        <div><div class="k">초미세먼지 평균 (PM2.5)</div>
+          <div class="v" style="color:${g(lv25).c}">${fmt(a25)}<small>㎍/㎥</small></div>
+          <span class="pill" style="background:${g(lv25).c}">${g(lv25).t}</span></div>
+        <div><div class="k">측정소</div><div class="v">${rows.length}<small>곳</small></div>
+          <div class="k" style="margin:6px 0 0">${rows[0] ? rows[0].data_time + " 기준" : ""}</div></div>
+        <div><div class="k">가장 높은 곳 (PM10)</div>
+          <div class="v" style="font-size:22px">${worst ? worst.station_name : "-"}</div>
+          <div class="k" style="margin:6px 0 0">${worst ? worst.pm10 + " ㎍/㎥" : ""}</div></div>`;
+    }
+
+    function tools() {
+      const opts = [["name", "이름순"], ["pm10", "미세먼지 높은 순"], ["pm25", "초미세먼지 높은 순"]];
+      $("tools").innerHTML = opts.map(([k, t]) =>
+        `<button class="chip ${sortBy === k ? "on" : ""}" data-k="${k}">${t}</button>`).join("")
+        + `<button class="btn" id="reload">↻ 새로고침</button>`;
+      $("tools").querySelectorAll(".chip").forEach(b => b.onclick = () => { sortBy = b.dataset.k; tools(); cards(); });
+      $("reload").onclick = load;
+    }
+
+    function cards() {
+      const list = [...rows];
+      if (sortBy === "name") list.sort((a, b) => a.station_name.localeCompare(b.station_name, "ko"));
+      else list.sort((a, b) => (b[sortBy] ?? -1) - (a[sortBy] ?? -1));
+      $("view").className = "grid";
+      $("view").innerHTML = list.map(r => {
+        const a = g(r.pm10_grade), b = g(r.pm25_grade);
+        return `<article class="card" style="--c:${a.c}">
+          <div class="top"><span class="name">${r.station_name}</span>
+            <span class="pill" style="background:${a.c}">${a.t}</span></div>
+          <div class="two">
+            <div class="m"><div class="l">미세먼지 PM10</div>
+              <div class="n" style="color:${a.c}">${fmt(r.pm10)}<small>㎍/㎥</small></div>
+              <div class="bar"><i style="width:${pct(r.pm10, 150)}%;background:${a.c}"></i></div></div>
+            <div class="m"><div class="l">초미세 PM2.5</div>
+              <div class="n" style="color:${b.c}">${fmt(r.pm25)}<small>㎍/㎥</small></div>
+              <div class="bar"><i style="width:${pct(r.pm25, 75)}%;background:${b.c}"></i></div></div>
+          </div>
+          <div class="sub"><span>오존 ${fmt(r.o3)}</span><span>NO₂ ${fmt(r.no2)}</span>
+            <span>CO ${fmt(r.co)}</span><span>SO₂ ${fmt(r.so2)}</span></div>
+          <div class="time">🕒 ${r.data_time}</div></article>`;
+      }).join("");
+    }
+
+    async function load() {
+      $("view").className = "state"; $("view").textContent = "불러오는 중…";
+      try {
+        const r = await fetch(API_BASE + "/air");
+        if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || "HTTP " + r.status);
+        const d = await r.json();
+        rows = d.items;
+        $("dbstate").textContent = d.saved_to_db ? "DB 저장됨 ✓" : "DB 저장 안 됨 (테이블 확인)";
+        summary(); tools(); cards();
+      } catch (e) {
+        $("view").className = "";
+        $("view").innerHTML = `<div class="err"><b>데이터를 불러오지 못했습니다.</b><br>
+          backend 서버가 켜져 있는지 확인하세요 (<code>${API_BASE}</code>).<br>
+          주소창이 <code>http://127.0.0.1:5000</code> 형태여야 합니다 (파일을 더블클릭해 열면 안 됩니다).<br>
+          오류: ${e.message}</div>`;
+      }
+    }
+    load();
+  </script>
+</body>
+</html>
