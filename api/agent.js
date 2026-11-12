@@ -6,7 +6,8 @@
 const { DECLARATIONS, runTool } = require("./_tools");
 
 const MODEL = process.env.GEMINI_MODEL || "gemini-3.8-flash";
-const MAX_ROUNDS = 5;           // 도구를 부르고 다시 생각하는 최대 횟수
+const THINKING = (process.env.GEMINI_THINKING || "low").toLowerCase();   // minimal | low | medium | high | off
+const MAX_ROUNDS = 5;          // 도구를 부르고 다시 생각하는 최대 횟수
 const MAX_HISTORY = 12;         // 대화 기록 최대 개수
 const MAX_TEXT = 1000;          // 메시지 1개 최대 글자 수
 
@@ -56,15 +57,21 @@ async function callGemini(body, deadline) {
   for (let attempt = 0; attempt < 3; attempt++) {
     let retry;
     try {
+      // 남은 시간 안에서 최대 35초까지 기다린다 (새 모델은 '생각하는' 시간이 길 수 있음)
+      const wait = Math.max(8000, Math.min(35000, deadline - Date.now() - 1000));
       const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`, {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-goog-api-key": process.env.GEMINI_API_KEY },
         body: JSON.stringify(body),
-        signal: AbortSignal.timeout(18000),
+        signal: AbortSignal.timeout(wait),
       });
       const data = await r.json().catch(() => ({}));
       if (r.ok) return data;
       const msg = data.error?.message || "Gemini 호출 실패 HTTP " + r.status;
+      if (r.status === 400 && /thinking/i.test(msg) && body.generationConfig?.thinkingConfig) {
+        delete body.generationConfig.thinkingConfig;           // 이 모델이 thinking 설정을 모르면 빼고 다시
+        attempt--; continue;
+      }
       retry = r.status === 429 || r.status === 503 || /high demand|overloaded|unavailable/i.test(msg);
       err = new Error(retry ? "AI 모델이 지금 많이 혼잡해요. 잠시 후 다시 시도해 주세요. (" + msg + ")" : msg);
     } catch (e) {
@@ -92,14 +99,18 @@ module.exports = async function handler(req, res) {
   if (!contents) return res.status(400).json({ error: "messages 형식이 올바르지 않습니다 (마지막은 user 메시지)" });
 
   const steps = [];
-  const deadline = Date.now() + 50000;      // Vercel 최대 60초 안에 끝내기 위한 마감
+  const deadline = Date.now() + 55000;      // Vercel 최대 60초 안에 끝내기 위한 마감
   try {
     for (let round = 0; round < MAX_ROUNDS; round++) {
       const data = await callGemini({
         systemInstruction: { parts: [{ text: SYSTEM }] },
         contents,
         tools: [{ functionDeclarations: DECLARATIONS }],
-        generationConfig: { temperature: 0.5, maxOutputTokens: 1200 },
+        // thinkingLevel: 모델이 답하기 전에 '생각'하는 양. low 로 두면 훨씬 빠름 (환경변수 GEMINI_THINKING 으로 변경, off 면 설정 안 함)
+        generationConfig: {
+          temperature: 0.5, maxOutputTokens: 2048,
+          ...(THINKING !== "off" ? { thinkingConfig: { thinkingLevel: THINKING } } : {}),
+        },
       }, deadline);
       const cand = data.candidates && data.candidates[0];
       const parts = (cand && cand.content && cand.content.parts) || [];
