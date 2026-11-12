@@ -79,6 +79,23 @@
     .pin small{font-size:10px;font-weight:600;margin-left:2px;opacity:.9}
     .lbl{background:#fff;border:1px solid var(--line);border-radius:8px;font-weight:700;
       padding:2px 7px;font-size:12px;color:var(--ink);box-shadow:none}
+    /* 날씨 (Open-Meteo) */
+    .weather{margin-top:18px;background:linear-gradient(135deg,#ffffff,#eef6ff);border:1px solid var(--line);
+      border-radius:20px;padding:18px 20px;box-shadow:0 8px 24px rgba(20,60,120,.08)}
+    .wx-head{display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:6px;margin-bottom:12px}
+    .wx-head b{font-size:15px} .wx-head span{font-size:12px;color:var(--sub)}
+    .wx-main{display:flex;gap:18px;align-items:center;flex-wrap:wrap}
+    .wx-icon{font-size:56px;line-height:1}
+    .wx-temp{font-size:44px;font-weight:800;line-height:1}
+    .wx-temp small{font-size:18px;color:var(--sub);font-weight:600}
+    .wx-desc{color:var(--sub);font-size:14px;margin-top:4px}
+    .wx-grid{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));flex:1;min-width:260px}
+    .wx-grid div{background:#fff;border:1px solid var(--line);border-radius:12px;padding:8px 12px}
+    .wx-grid .l{font-size:11.5px;color:var(--sub)} .wx-grid .v{font-size:17px;font-weight:700}
+    .wx-hours{display:flex;gap:8px;overflow-x:auto;margin-top:14px;padding-bottom:2px}
+    .wx-hours div{flex:0 0 auto;min-width:64px;text-align:center;background:#fff;border:1px solid var(--line);
+      border-radius:12px;padding:7px 6px;font-size:12px;color:var(--sub)}
+    .wx-hours b{display:block;font-size:15px;color:var(--ink);margin:2px 0}
     .card[data-st]{cursor:pointer}
     .go{margin-top:8px;font-size:11.5px;color:var(--g1)}
   </style>
@@ -93,6 +110,7 @@
 
   <main>
     <section class="summary" id="summary"></section>
+    <section class="weather" id="weather"><div class="state" style="padding:20px 0">날씨 불러오는 중…</div></section>
     <section class="mapwrap">
       <div id="map"></div>
       <aside id="detail"><div class="hint">🗺️ 지도에서 <b>지역(원)</b>을 클릭하면<br>그 지역의 미세먼지를 보여 드려요.</div></aside>
@@ -181,6 +199,63 @@
           <div class="time">🕒 ${r.data_time}</div>`;
     }
 
+    // ───────── 실시간 날씨 (Open-Meteo, 무료·API 키 불필요) ─────────
+    // WMO 날씨 코드 → [이모지, 설명]
+    const WMO = {
+      0: ["☀️", "맑음"], 1: ["🌤️", "대체로 맑음"], 2: ["⛅", "구름 조금"], 3: ["☁️", "흐림"],
+      45: ["🌫️", "안개"], 48: ["🌫️", "서리 안개"],
+      51: ["🌦️", "약한 이슬비"], 53: ["🌦️", "이슬비"], 55: ["🌧️", "강한 이슬비"],
+      61: ["🌧️", "약한 비"], 63: ["🌧️", "비"], 65: ["🌧️", "강한 비"],
+      66: ["🌧️", "어는 비"], 67: ["🌧️", "강한 어는 비"],
+      71: ["🌨️", "약한 눈"], 73: ["🌨️", "눈"], 75: ["❄️", "강한 눈"], 77: ["🌨️", "싸락눈"],
+      80: ["🌦️", "소나기"], 81: ["🌧️", "강한 소나기"], 82: ["⛈️", "매우 강한 소나기"],
+      85: ["🌨️", "눈 소나기"], 86: ["🌨️", "강한 눈 소나기"],
+      95: ["⛈️", "뇌우"], 96: ["⛈️", "우박 동반 뇌우"], 99: ["⛈️", "강한 우박 뇌우"],
+    };
+    const wmo = c => WMO[c] || ["🌡️", "알 수 없음"];
+    const compass = deg => ["북", "북동", "동", "남동", "남", "남서", "서", "북서"][Math.round(deg / 45) % 8] + "풍";
+    const JEJU_CITY = [33.4996, 126.5312];
+    const wxCache = {};
+
+    async function loadWeather(coord, label) {
+      const key = coord.join(",");
+      const box = $("weather");
+      try {
+        let d = wxCache[key] && Date.now() - wxCache[key].at < 600000 ? wxCache[key].d : null;
+        if (!d) {
+          const url = "https://api.open-meteo.com/v1/forecast?latitude=" + coord[0] + "&longitude=" + coord[1]
+            + "&current=temperature_2m,apparent_temperature,relative_humidity_2m,precipitation,weather_code,wind_speed_10m,wind_direction_10m"
+            + "&hourly=temperature_2m,precipitation_probability,weather_code&forecast_hours=7"
+            + "&wind_speed_unit=ms&timezone=Asia%2FSeoul";
+          const r = await fetch(url);
+          if (!r.ok) throw new Error("HTTP " + r.status);
+          d = await r.json();
+          wxCache[key] = {at: Date.now(), d};
+        }
+        const c = d.current, [icon, desc] = wmo(c.weather_code), h = d.hourly;
+        const hours = h.time.slice(1, 7).map((t, i) => {
+          const k = i + 1, [ic] = wmo(h.weather_code[k]);
+          return `<div>${t.slice(11, 16)}<b>${ic} ${Math.round(h.temperature_2m[k])}°</b>💧${h.precipitation_probability[k] ?? 0}%</div>`;
+        }).join("");
+        box.innerHTML = `
+          <div class="wx-head"><b>🌤️ 현재 날씨 · ${label}</b>
+            <span>${c.time.replace("T", " ")} 기준 · Open-Meteo</span></div>
+          <div class="wx-main">
+            <div><div class="wx-icon">${icon}</div></div>
+            <div><div class="wx-temp">${Math.round(c.temperature_2m)}<small>°C</small></div>
+              <div class="wx-desc">${desc} · 체감 ${Math.round(c.apparent_temperature)}°C</div></div>
+            <div class="wx-grid">
+              <div><div class="l">💧 습도</div><div class="v">${c.relative_humidity_2m}%</div></div>
+              <div><div class="l">🌬️ 바람</div><div class="v">${c.wind_speed_10m} m/s</div>
+                <div class="l">${compass(c.wind_direction_10m)}</div></div>
+              <div><div class="l">☔ 강수량</div><div class="v">${c.precipitation} mm</div></div>
+            </div></div>
+          <div class="wx-hours">${hours}</div>`;
+      } catch (e) {
+        box.innerHTML = `<div class="state" style="padding:20px 0">날씨를 불러오지 못했습니다 (${e.message})</div>`;
+      }
+    }
+
     // ───────── 지도 (Leaflet + OpenStreetMap) ─────────
     // 측정소 위치는 동네 중심 근처의 대략적인 좌표입니다 (정밀 측정소 좌표 아님).
     const COORDS = {
@@ -232,6 +307,7 @@
       $("detail").innerHTML = `<article class="card" style="--c:${g(r.pm10_grade).c}">${cardBody(r)}</article>`;
       const c = COORDS[name];
       if (c && map) fly ? map.flyTo(c, 11, {duration: .8}) : map.panTo(c);
+      if (c) loadWeather(c, name);   // 선택한 지역의 날씨로 바꾼다
     }
 
     // 예측 영역: 최근 기록(실선) + 선형회귀 예측(점선) 미니 그래프
@@ -277,6 +353,7 @@
           오류: ${e.message}</div>`;
       }
     }
+    loadWeather(JEJU_CITY, "제주시");   // 처음에는 제주시 날씨 (미세먼지와 별개로 불러온다)
     load();
   </script>
 </body>
