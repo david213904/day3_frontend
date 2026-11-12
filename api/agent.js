@@ -48,16 +48,33 @@ function brief(result) {
   return result;
 }
 
-async function callGemini(body) {
-  const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "x-goog-api-key": process.env.GEMINI_API_KEY },
-    body: JSON.stringify(body),
-    signal: AbortSignal.timeout(25000),
-  });
-  const data = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(data.error?.message || "Gemini 호출 실패 HTTP " + r.status);
-  return data;
+const sleep = ms => new Promise(ok => setTimeout(ok, ms));
+
+// 모델이 혼잡(429/503)하면 잠깐 쉬었다가 다시 시도한다 (총 3번, 전체 45초 안에서만)
+async function callGemini(body, deadline) {
+  let err;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    let retry;
+    try {
+      const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-goog-api-key": process.env.GEMINI_API_KEY },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(18000),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (r.ok) return data;
+      const msg = data.error?.message || "Gemini 호출 실패 HTTP " + r.status;
+      retry = r.status === 429 || r.status === 503 || /high demand|overloaded|unavailable/i.test(msg);
+      err = new Error(retry ? "AI 모델이 지금 많이 혼잡해요. 잠시 후 다시 시도해 주세요. (" + msg + ")" : msg);
+    } catch (e) {
+      err = e; retry = true;                                   // 시간 초과 등 네트워크 오류도 재시도
+    }
+    if (!retry) throw err;                                     // 키/모델 이름 같은 오류는 재시도해도 소용없음
+    if (attempt === 2 || Date.now() + 2500 > deadline) break;
+    await sleep(1500 + attempt * 2000);
+  }
+  throw err;
 }
 
 module.exports = async function handler(req, res) {
@@ -75,6 +92,7 @@ module.exports = async function handler(req, res) {
   if (!contents) return res.status(400).json({ error: "messages 형식이 올바르지 않습니다 (마지막은 user 메시지)" });
 
   const steps = [];
+  const deadline = Date.now() + 50000;      // Vercel 최대 60초 안에 끝내기 위한 마감
   try {
     for (let round = 0; round < MAX_ROUNDS; round++) {
       const data = await callGemini({
@@ -82,7 +100,7 @@ module.exports = async function handler(req, res) {
         contents,
         tools: [{ functionDeclarations: DECLARATIONS }],
         generationConfig: { temperature: 0.5, maxOutputTokens: 1200 },
-      });
+      }, deadline);
       const cand = data.candidates && data.candidates[0];
       const parts = (cand && cand.content && cand.content.parts) || [];
       const calls = parts.filter(p => p.functionCall);
