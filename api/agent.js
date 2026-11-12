@@ -5,7 +5,7 @@
 
 const { DECLARATIONS, runTool } = require("./_tools");
 
-const MODEL = process.env.GEMINI_MODEL || "gemini-2.5-flash";
+const MODEL = process.env.GEMINI_MODEL || "gemini-3.8-flash";
 const MAX_ROUNDS = 5;           // 도구를 부르고 다시 생각하는 최대 횟수
 const MAX_HISTORY = 12;         // 대화 기록 최대 개수
 const MAX_TEXT = 1000;          // 메시지 1개 최대 글자 수
