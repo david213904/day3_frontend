@@ -150,7 +150,7 @@ async function searchPlaces({ category, query, near, radius_m } = {}) {
         if (r.ok) { j = await r.json(); break; }
       } catch (_) { /* 다음 서버로 */ }
     }
-    if (!j) return nominatimSearch(center, radius, CATEGORY_TERM[category] || category);   // 모두 실패하면 Nominatim 으로 대체
+    if (!j) return nominatimSearch(center, radius, CATEGORY_TERM[category] || category, near);   // 모두 실패하면 Nominatim 으로 대체
     places = (j.elements || []).map(e => {
       const t = e.tags || {}, lat = e.lat ?? e.center?.lat, lng = e.lon ?? e.center?.lon;
       return {
@@ -164,7 +164,7 @@ async function searchPlaces({ category, query, near, radius_m } = {}) {
     const info = p => (p.opening_hours ? 2 : 0) + (p.address ? 1 : 0) + (p.website ? 1 : 0);
     places.sort((a, b) => info(b) - info(a) || a.distance_m - b.distance_m);
   } else if (query) {
-    return nominatimSearch(center, radius, query);     // 자유 검색어(특정 가게 이름 등)
+    return nominatimSearch(center, radius, query, near);     // 자유 검색어(특정 가게 이름 등)
   } else {
     return { error: `category(${Object.keys(CATEGORY).join(", ")}) 또는 query 중 하나가 필요합니다.` };
   }
@@ -189,7 +189,7 @@ function pack(center, near, radius, places) {
 }
 
 // Nominatim: 중심 좌표 주변 사각형 안에서만(bounded) 검색
-async function nominatimSearch(center, radius, term) {
+async function nominatimSearch(center, radius, term, nearLabel) {
   const d = radius / 111000, vb = [center.lng - d, center.lat + d, center.lng + d, center.lat - d].join(",");
   const u = "https://nominatim.openstreetmap.org/search?format=jsonv2&limit=12&accept-language=ko&extratags=1"
     + `&bounded=1&viewbox=${vb}&q=` + encodeURIComponent(term);
@@ -200,7 +200,7 @@ async function nominatimSearch(center, radius, term) {
     opening_hours: x.extratags?.opening_hours || null, website: x.extratags?.website || null,
     lat: +x.lat, lng: +x.lon, distance_m: distanceM(center.lat, center.lng, +x.lat, +x.lon), map: mapLink(x.lat, x.lon),
   })).filter(p => p.name).sort((a, b) => a.distance_m - b.distance_m);
-  return pack(center, term, radius, places);
+  return pack(center, nearLabel || term, radius, places);
 }
 
 // ───────── Gemini 에 알려 줄 도구 설명 ─────────
