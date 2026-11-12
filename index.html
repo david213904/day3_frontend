@@ -92,6 +92,16 @@
     .wx-grid{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));flex:1;min-width:260px}
     .wx-grid div{background:#fff;border:1px solid var(--line);border-radius:12px;padding:8px 12px}
     .wx-grid .l{font-size:11.5px;color:var(--sub)} .wx-grid .v{font-size:17px;font-weight:700}
+    .wx-air{margin-top:14px;background:#fff;border:1px solid var(--line);border-radius:12px;padding:10px 14px;
+      display:flex;gap:6px 16px;flex-wrap:wrap;align-items:center;font-size:13.5px}
+    .wx-air small{color:var(--sub);font-size:11.5px}
+    .wx-air .pill{margin-left:4px;font-size:11px;padding:2px 8px}
+    .sd-sum{display:flex;gap:10px;margin:10px 0}
+    .sd-sum div{flex:1;background:var(--bg);border-radius:12px;padding:8px 10px;text-align:center}
+    .sd-sum b{font-size:22px;display:block}
+    .sd-list{max-height:230px;overflow:auto;margin-top:8px;border-top:1px solid var(--line)}
+    .sd-list div{display:flex;justify-content:space-between;gap:8px;padding:6px 2px;border-bottom:1px solid var(--line);font-size:13px}
+    .sd-list i{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:6px}
     .wx-hours{display:flex;gap:8px;overflow-x:auto;margin-top:14px;padding-bottom:2px}
     .wx-hours div{flex:0 0 auto;min-width:64px;text-align:center;background:#fff;border:1px solid var(--line);
       border-radius:12px;padding:7px 6px;font-size:12px;color:var(--sub)}
@@ -113,6 +123,7 @@
     .wpin{background:#fff;border:2px solid var(--g1);border-radius:14px;padding:3px 8px;font-weight:800;
       font-size:13px;white-space:nowrap;box-shadow:0 3px 10px rgba(0,0,0,.25);text-align:center;line-height:1.25}
     .wpin small{display:block;font-size:10.5px;font-weight:600;color:var(--sub)}
+    .wpin .dp{display:inline-block;color:#fff;border-radius:10px;padding:0 6px;font-size:12px;margin-left:2px}
     .sp{font-size:30px;filter:drop-shadow(0 2px 3px rgba(0,0,0,.4))}
     .card[data-st]{cursor:pointer}
     .go{margin-top:8px;font-size:11.5px;color:var(--g1)}
@@ -254,9 +265,13 @@
             + "&current=temperature_2m,apparent_temperature,relative_humidity_2m,precipitation,weather_code,wind_speed_10m,wind_direction_10m"
             + "&hourly=temperature_2m,precipitation_probability,weather_code&forecast_hours=7"
             + "&wind_speed_unit=ms&timezone=Asia%2FSeoul";
-          const r = await fetch(url);
+          // 대기질(Open-Meteo Air Quality, 모델 추정값)도 같이 가져온다. 실패해도 날씨는 보여준다.
+          const airUrl = "https://air-quality-api.open-meteo.com/v1/air-quality?latitude=" + coord[0]
+            + "&longitude=" + coord[1] + "&current=pm10,pm2_5,us_aqi&timezone=Asia%2FSeoul";
+          const [r, ra] = await Promise.all([fetch(url), fetch(airUrl).catch(() => null)]);
           if (!r.ok) throw new Error("HTTP " + r.status);
           d = await r.json();
+          try { d.air = ra && ra.ok ? (await ra.json()).current : null; } catch (_) { d.air = null; }
           wxCache[key] = {at: Date.now(), d};
         }
         const c = d.current, [icon, desc] = wmo(c.weather_code), h = d.hourly;
@@ -277,10 +292,24 @@
                 <div class="l">${compass(c.wind_direction_10m)}</div></div>
               <div><div class="l">☔ 강수량</div><div class="v">${c.precipitation} mm</div></div>
             </div></div>
+          ${airHtml(d.air)}
           <div class="wx-hours">${hours}</div>`;
       } catch (e) {
         box.innerHTML = `<div class="state" style="padding:20px 0">날씨를 불러오지 못했습니다 (${e.message})</div>`;
       }
+    }
+
+    // 등급 기준(환경부): PM10 30/80/150, PM2.5 15/35/75
+    const lvPM10 = v => v == null ? 0 : v <= 30 ? 1 : v <= 80 ? 2 : v <= 150 ? 3 : 4;
+    const lvPM25 = v => v == null ? 0 : v <= 15 ? 1 : v <= 35 ? 2 : v <= 75 ? 3 : 4;
+    function airHtml(a) {
+      if (!a) return "";
+      const p10 = a.pm10 == null ? null : Math.round(a.pm10), p25 = a.pm2_5 == null ? null : Math.round(a.pm2_5);
+      const b = (v, lv) => `<span class="pill" style="background:${g(lv).c}">${g(lv).t}</span>`;
+      return `<div class="wx-air">💨 <b>대기질</b> <small>(Open-Meteo 모델 추정값)</small>
+        <span>미세먼지 PM10 <b>${fmt(p10)}</b> ${b(p10, lvPM10(p10))}</span>
+        <span>초미세 PM2.5 <b>${fmt(p25)}</b> ${b(p25, lvPM25(p25))}</span>
+        <span>AQI(미국) <b>${fmt(a.us_aqi)}</b></span></div>`;
     }
 
     // ───────── 지도 (Leaflet + OpenStreetMap) ─────────
@@ -493,6 +522,7 @@
       if (!c) return;
       $("q").value = c.n; $("sg").style.display = "none"; sgItems = [];
       loadWeather([c.lat, c.lng], c.n);
+      showSido(sidoOf(c));                 // 한국이면 그 시·도의 실측 미세먼지도 같이 보여준다
       if (!map) return;
       if (searchMarker) searchMarker.remove();
       searchMarker = L.marker([c.lat, c.lng], {title: c.n, icon: L.divIcon({className: "", iconSize: null,
@@ -515,6 +545,55 @@
       }
     });
 
+    // ───────── 전국 실측 미세먼지 (백엔드 /air/national: 에어코리아 17개 시·도) ─────────
+    const SIDO_LONG = {
+      "서울특별시": "서울", "부산광역시": "부산", "대구광역시": "대구", "인천광역시": "인천", "광주광역시": "광주",
+      "대전광역시": "대전", "울산광역시": "울산", "세종특별자치시": "세종", "경기도": "경기", "강원특별자치도": "강원",
+      "강원도": "강원", "충청북도": "충북", "충청남도": "충남", "전북특별자치도": "전북", "전라북도": "전북",
+      "전라남도": "전남", "경상북도": "경북", "경상남도": "경남", "제주특별자치도": "제주",
+    };
+    // 검색 결과의 지역 문자열(예: "성동구 서울특별시")에서 시·도를 찾는다. 한국이 아니면 null
+    const sidoOf = c => {
+      const p = c.p || "";
+      const k = Object.keys(SIDO_LONG).find(k => p.includes(k));
+      return k ? SIDO_LONG[k] : null;
+    };
+    let natPromise = null;
+    function getNational() {
+      if (!natPromise) {
+        natPromise = fetch(API_BASE + "/air/national").then(async r => {
+          if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || "HTTP " + r.status);
+          return r.json();
+        }).catch(e => { natPromise = null; throw e; });
+        setTimeout(() => natPromise = null, 600000);   // 10분 뒤 새로 받는다
+      }
+      return natPromise;
+    }
+
+    async function showSido(sido) {
+      if (!sido) return;
+      const box = $("detail");
+      box.innerHTML = `<article class="card" style="--c:var(--g1)"><div class="state" style="padding:30px 0">${sido} 실측 미세먼지 불러오는 중…</div></article>`;
+      try {
+        const s = (await getNational()).sidos[sido];
+        if (!s) throw new Error("데이터 없음");
+        const list = [...s.items].sort((a, b) => (b.pm10 ?? -1) - (a.pm10 ?? -1));
+        const l10 = lvPM10(s.avg_pm10), l25 = lvPM25(s.avg_pm25);
+        box.innerHTML = `<article class="card" style="--c:${g(l10).c}">
+          <div class="top"><span class="name">${sido} 실측 미세먼지</span>
+            <span class="pill" style="background:${g(l10).c}">${g(l10).t}</span></div>
+          <div class="sd-sum">
+            <div><span class="l">PM10 평균</span><b style="color:${g(l10).c}">${fmt(s.avg_pm10)}</b></div>
+            <div><span class="l">PM2.5 평균</span><b style="color:${g(l25).c}">${fmt(s.avg_pm25)}</b></div>
+            <div><span class="l">측정소</span><b>${s.count}</b></div></div>
+          <div class="sd-list">${list.map(i => `<div><span><i style="background:${g(i.pm10_grade).c}"></i>${i.station_name}</span>
+            <span>PM10 <b>${fmt(i.pm10)}</b> · PM2.5 <b>${fmt(i.pm25)}</b></span></div>`).join("")}</div>
+          <div class="time">📡 에어코리아 실측 · ${list[0] ? list[0].data_time : ""}<br>측정소 좌표가 없어 지도에는 시·도 평균으로 표시</div></article>`;
+      } catch (e) {
+        box.innerHTML = `<div class="hint">${sido} 실측 데이터를 불러오지 못했어요 (${e.message})</div>`;
+      }
+    }
+
     // ───────── 전국 날씨 지도: 17개 시·도 날씨를 한 번의 호출로 ─────────
     let natOn = false, natLayer = null;
     $("natBtn").onclick = async () => {
@@ -532,14 +611,17 @@
         + "&longitude=" + mains.map(c => c.lng).join(",")
         + "&current=temperature_2m,weather_code&timezone=Asia%2FSeoul";
       try {
-        const r = await fetch(url);
+        // 날씨(Open-Meteo)와 시·도별 실측 미세먼지(우리 백엔드)를 동시에. 미세먼지가 실패해도 날씨 핀은 그린다.
+        const [r, nat] = await Promise.all([fetch(url), getNational().catch(() => null)]);
         if (!r.ok) throw new Error("HTTP " + r.status);
         const arr = await r.json();
         natLayer = L.layerGroup().addTo(map);
         mains.forEach((c, i) => {
           const cur = arr[i].current, [ic] = wmo(cur.weather_code);
-          L.marker([c.lat, c.lng], {title: c.n, icon: L.divIcon({className: "", iconSize: null, iconAnchor: [36, 22],
-            html: `<div class="wpin">${ic} ${Math.round(cur.temperature_2m)}°<small>${c.label || c.n}</small></div>`})})
+          const s = nat && nat.sidos[sidoOf(c)], v = s ? s.avg_pm10 : null, lv = lvPM10(v);
+          const dust = v == null ? "" : `<span class="dp" style="background:${g(lv).c}">${Math.round(v)}</span>`;
+          L.marker([c.lat, c.lng], {title: c.n, icon: L.divIcon({className: "", iconSize: null, iconAnchor: [40, 26],
+            html: `<div class="wpin" style="${v == null ? "" : "border-color:" + g(lv).c}">${ic} ${Math.round(cur.temperature_2m)}° ${dust}<small>${c.label || c.n}</small></div>`})})
             .on("click", () => pickPlace(c)).addTo(natLayer);
         });
         map.fitBounds([[33.0, 125.9], [38.7, 130.3]]);
