@@ -395,7 +395,9 @@
         if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || "HTTP " + r.status);
         const d = await r.json();
         rows = d.items;
-        $("dbstate").textContent = d.saved_to_db ? "DB 저장됨 ✓" : "DB 저장 안 됨 (테이블 확인)";
+        $("dbstate").textContent = d.source === "db"
+          ? "⚠️ 공공데이터 연결 지연 → DB에 저장해 둔 최신 값을 표시 중"
+          : d.saved_to_db ? "DB 저장됨 ✓" : "DB 저장 안 됨 (테이블 확인)";
         // 예측은 부가 기능: 실패해도 화면은 그대로 보여준다
         try {
           const fr = await fetch(API_BASE + "/air/forecast?hours=3");
@@ -576,7 +578,7 @@
       box.innerHTML = `<article class="card" style="--c:var(--g1)"><div class="state" style="padding:30px 0">${sido} 실측 미세먼지 불러오는 중…</div></article>`;
       try {
         const s = (await getNational()).sidos[sido];
-        if (!s) throw new Error("데이터 없음");
+        if (!s) throw new Error("실측 데이터가 아직 없음 (공공데이터 연결이 안 되면 저장해 둔 지역만 표시됨)");
         const list = [...s.items].sort((a, b) => (b.pm10 ?? -1) - (a.pm10 ?? -1));
         const l10 = lvPM10(s.avg_pm10), l25 = lvPM25(s.avg_pm25);
         box.innerHTML = `<article class="card" style="--c:${g(l10).c}">
@@ -588,7 +590,7 @@
             <div><span class="l">측정소</span><b>${s.count}</b></div></div>
           <div class="sd-list">${list.map(i => `<div><span><i style="background:${g(i.pm10_grade).c}"></i>${i.station_name}</span>
             <span>PM10 <b>${fmt(i.pm10)}</b> · PM2.5 <b>${fmt(i.pm25)}</b></span></div>`).join("")}</div>
-          <div class="time">📡 에어코리아 실측 · ${list[0] ? list[0].data_time : ""}<br>측정소 좌표가 없어 지도에는 시·도 평균으로 표시</div></article>`;
+          <div class="time">📡 에어코리아 실측${s.source === "db" ? " (DB 저장본)" : ""} · ${list[0] ? list[0].data_time : ""}<br>측정소 좌표가 없어 지도에는 시·도 평균으로 표시</div></article>`;
       } catch (e) {
         box.innerHTML = `<div class="hint">${sido} 실측 데이터를 불러오지 못했어요 (${e.message})</div>`;
       }
