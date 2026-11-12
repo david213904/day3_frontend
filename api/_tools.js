@@ -59,7 +59,7 @@ const mapLink = (lat, lng) => `https://www.openstreetmap.org/?mlat=${lat}&mlon=$
 async function fetchRetry(url, opt = {}, tries = 2) {
   let r;
   for (let i = 0; i < tries; i++) {
-    r = await fetch(url, { ...opt, signal: AbortSignal.timeout(6000) });
+    r = await fetch(url, { ...opt, signal: AbortSignal.timeout(5000) });
     if (r.status !== 429 && r.status !== 503) return r;
     await new Promise(ok => setTimeout(ok, 1300));
   }
@@ -79,7 +79,7 @@ async function geocode(place) {
   // 2) Open-Meteo 지명 검색(대체): 전체 문장 → 첫 단어 순서로 시도
   for (const q of hit ? [] : [key, key.split(/\s+/)[0]]) {
     try {
-      const r = await fetch("https://geocoding-api.open-meteo.com/v1/search?count=1&language=ko&name=" + encodeURIComponent(q), { signal: AbortSignal.timeout(6000) });
+      const r = await fetch("https://geocoding-api.open-meteo.com/v1/search?count=1&language=ko&name=" + encodeURIComponent(q), { signal: AbortSignal.timeout(5000) });
       const x = r.ok && (await r.json()).results?.[0];
       if (x) { hit = { lat: x.latitude, lng: x.longitude, name: [x.name, x.admin1].filter(Boolean).join(", ") }; break; }
     } catch (_) { /* 계속 */ }
@@ -145,7 +145,7 @@ async function searchPlaces({ category, query, near, radius_m } = {}) {
       try {
         const r = await fetch(ep, {
           method: "POST", headers: { ...UA, "Content-Type": "application/x-www-form-urlencoded" },
-          body: "data=" + encodeURIComponent(q), signal: AbortSignal.timeout(6000),
+          body: "data=" + encodeURIComponent(q), signal: AbortSignal.timeout(5000),
         });
         if (r.ok) { j = await r.json(); break; }
       } catch (_) { /* 다음 서버로 */ }
@@ -174,7 +174,6 @@ async function searchPlaces({ category, query, near, radius_m } = {}) {
 const OVERPASS = [
   "https://overpass-api.de/api/interpreter",
   "https://overpass.kumi.systems/api/interpreter",
-  "https://overpass.private.coffee/api/interpreter",
 ];
 const CATEGORY_TERM = {   // Nominatim 대체 검색용 영어 검색어
   restaurant: "restaurant", cafe: "cafe", bar: "bar", tourist_attraction: "attraction", museum: "museum",

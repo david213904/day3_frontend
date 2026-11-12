@@ -13,7 +13,8 @@ const MAX_TEXT = 1000;          // 메시지 1개 최대 글자 수
 
 const SYSTEM = `너는 사용자의 상황에 맞는 장소를 추천하는 한국어 어시스턴트야. 존댓말로 친절하고 간결하게 답해.
 규칙:
-1. '오늘', '지금', '이따', '저녁', '주말' 처럼 시간이 관련된 질문이면 먼저 get_current_datetime 으로 실제 현재 시각을 확인해. 네 기억으로 날짜를 추측하지 마.
+0. 사용자가 실제로 물어본 것에만 답해. 사용자가 말하지 않은 지역, 음식, 장소를 네가 마음대로 정하지 마.
+1. '오늘', '지금', '이따', '저녁', '주말' 처럼 시간이 관련된 질문이면 먼저 get_current_datetime 으로 실제 현재 시각을 확인해. 네 기억으로 날짜를 추측하지 마. 사용자가 시각이나 날짜만 물으면 그 결과만 알려 주고, 장소 이야기는 꺼내지 마.
 2. 장소를 추천하기 전에 반드시 search_places 로 실제 검색해. 검색 결과에 없는 장소 이름은 절대 지어내지 마.
 3. 사용자가 지역을 말하지 않았으면 도구를 부르지 말고 어느 지역인지 먼저 되물어.
 4. 시각과 장소의 opening_hours 가 둘 다 있으면 지금 영업 중일 가능성을 비교해서 알려 줘. 영업시간 정보가 없으면 '확인 필요'라고 말해.
@@ -99,9 +100,12 @@ module.exports = async function handler(req, res) {
   if (!contents) return res.status(400).json({ error: "messages 형식이 올바르지 않습니다 (마지막은 user 메시지)" });
 
   const steps = [];
-  const deadline = Date.now() + 55000;      // Vercel 최대 60초 안에 끝내기 위한 마감
+  const deadline = Date.now() + 50000;      // Vercel 최대 60초(504) 안에 끝내기 위한 마감
   try {
     for (let round = 0; round < MAX_ROUNDS; round++) {
+      if (round > 0 && deadline - Date.now() < 9000) {      // 시간이 모자라면 504 로 죽지 말고 지금까지의 결과를 돌려준다
+        return res.status(200).json({ answer: "검색이 너무 오래 걸려서 중간에 멈췄어요. 위 도구 결과를 참고하시거나 잠시 후 다시 질문해 주세요.", steps });
+      }
       const data = await callGemini({
         systemInstruction: { parts: [{ text: SYSTEM }] },
         contents,
@@ -121,13 +125,20 @@ module.exports = async function handler(req, res) {
         return res.status(200).json({ answer: answer || "답변을 만들지 못했어요. 다시 질문해 주세요.", steps });
       }
       contents.push(cand.content);                           // 모델의 호출 요청을 그대로 이어 붙임
-      const responses = [];
-      for (const p of calls) {                               // 요청된 도구를 실제로 실행
+      // 요청된 도구를 동시에 실행 (각 도구는 최대 18초, 남은 시간보다 오래 기다리지 않음)
+      const limit = Math.max(3000, Math.min(18000, deadline - Date.now() - 9000));
+      const done = await Promise.all(calls.map(async p => {
         const { name, args } = p.functionCall;
-        const result = await runTool(name, args);
-        steps.push({ tool: name, args: args || {}, result: brief(result) });
-        responses.push({ functionResponse: { name, response: { result } } });
-      }
+        const result = await Promise.race([
+          runTool(name, args),
+          new Promise(ok => setTimeout(() => ok({ error: "도구 실행 시간이 초과됐어요 (검색 서버가 느림)" }), limit)),
+        ]);
+        return { name, args: args || {}, result };
+      }));
+      const responses = done.map(d => {
+        steps.push({ tool: d.name, args: d.args, result: brief(d.result) });
+        return { functionResponse: { name: d.name, response: { result: d.result } } };
+      });
       contents.push({ role: "user", parts: responses });     // 결과를 모델에게 돌려줌
     }
     return res.status(200).json({ answer: "도구를 너무 여러 번 호출했어요. 질문을 조금 더 구체적으로 해 주세요.", steps });
