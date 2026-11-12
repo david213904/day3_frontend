@@ -96,6 +96,24 @@
     .wx-hours div{flex:0 0 auto;min-width:64px;text-align:center;background:#fff;border:1px solid var(--line);
       border-radius:12px;padding:7px 6px;font-size:12px;color:var(--sub)}
     .wx-hours b{display:block;font-size:15px;color:var(--ink);margin:2px 0}
+    .wxbar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:14px;position:relative}
+    .sbox{position:relative;flex:1;min-width:220px;max-width:420px}
+    .sbox input{width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:12px;
+      font:inherit;font-size:14px;background:#fff;color:var(--ink)}
+    .sbox input:focus{outline:2px solid var(--g1);border-color:transparent}
+    #sg{position:absolute;left:0;right:0;top:calc(100% + 4px);background:#fff;border:1px solid var(--line);
+      border-radius:12px;box-shadow:0 10px 26px rgba(20,60,120,.18);z-index:1000;list-style:none;margin:0;padding:4px;
+      max-height:300px;overflow:auto;display:none}
+    #sg li{padding:8px 10px;border-radius:8px;cursor:pointer;font-size:14px;display:flex;justify-content:space-between;gap:8px}
+    #sg li:hover,#sg li.hl{background:#eef5ff}
+    #sg li small{color:var(--sub);font-size:12px}
+    #sg .note{cursor:default;color:var(--sub);font-size:12px;background:none!important}
+    .natbtn{border:1px solid var(--line);background:#fff;border-radius:12px;padding:9px 14px;font-size:13.5px;cursor:pointer}
+    .natbtn.on{background:var(--g1);border-color:var(--g1);color:#fff}
+    .wpin{background:#fff;border:2px solid var(--g1);border-radius:14px;padding:3px 8px;font-weight:800;
+      font-size:13px;white-space:nowrap;box-shadow:0 3px 10px rgba(0,0,0,.25);text-align:center;line-height:1.25}
+    .wpin small{display:block;font-size:10.5px;font-weight:600;color:var(--sub)}
+    .sp{font-size:30px;filter:drop-shadow(0 2px 3px rgba(0,0,0,.4))}
     .card[data-st]{cursor:pointer}
     .go{margin-top:8px;font-size:11.5px;color:var(--g1)}
   </style>
@@ -110,7 +128,16 @@
 
   <main>
     <section class="summary" id="summary"></section>
-    <section class="weather" id="weather"><div class="state" style="padding:20px 0">날씨 불러오는 중…</div></section>
+    <section class="weather">
+      <div class="wxbar">
+        <div class="sbox">
+          <input id="q" type="search" autocomplete="off" placeholder="🔍 전국 지역 검색 (예: 서, 해운대, 수원)">
+          <ul id="sg"></ul>
+        </div>
+        <button class="natbtn" id="natBtn">🇰🇷 전국 날씨 지도</button>
+      </div>
+      <div id="wxbody"><div class="state" style="padding:20px 0">날씨 불러오는 중…</div></div>
+    </section>
     <section class="mapwrap">
       <div id="map"></div>
       <aside id="detail"><div class="hint">🗺️ 지도에서 <b>지역(원)</b>을 클릭하면<br>그 지역의 미세먼지를 보여 드려요.</div></aside>
@@ -219,7 +246,7 @@
 
     async function loadWeather(coord, label) {
       const key = coord.join(",");
-      const box = $("weather");
+      const box = $("wxbody");
       try {
         let d = wxCache[key] && Date.now() - wxCache[key].at < 600000 ? wxCache[key].d : null;
         if (!d) {
@@ -284,6 +311,7 @@
 
     function drawMarkers() {
       initMap();
+      if (natOn) return;   // 전국 날씨 지도를 보는 중이면 미세먼지 핀은 그리지 않는다
       if (!map) { $("map").innerHTML = `<div class="state">지도를 불러오지 못했습니다 (인터넷 연결 확인)</div>`; return; }
       Object.values(markers).forEach(m => m.remove());
       markers = {};
@@ -353,6 +381,174 @@
           오류: ${e.message}</div>`;
       }
     }
+    // ───────── 전국 지역 검색 (첫 글자 자동완성 + 한글→영문 변환 검색) ─────────
+    // main:true 는 "전국 날씨 지도"에 표시되는 17개 시·도 대표 도시
+    const CITIES = [
+      {n: "서울", lat: 37.5665, lng: 126.9780, main: 1, p: "서울특별시"}, {n: "부산", lat: 35.1796, lng: 129.0756, main: 1, p: "부산광역시"},
+      {n: "대구", lat: 35.8714, lng: 128.6014, main: 1, p: "대구광역시"}, {n: "인천", lat: 37.4563, lng: 126.7052, main: 1, p: "인천광역시"},
+      {n: "광주", lat: 35.1595, lng: 126.8526, main: 1, p: "광주광역시"}, {n: "대전", lat: 36.3504, lng: 127.3845, main: 1, p: "대전광역시"},
+      {n: "울산", lat: 35.5384, lng: 129.3114, main: 1, p: "울산광역시"}, {n: "세종", lat: 36.4800, lng: 127.2890, main: 1, p: "세종특별자치시"},
+      {n: "수원", lat: 37.2636, lng: 127.0286, main: 1, p: "경기도", label: "경기·수원"}, {n: "춘천", lat: 37.8813, lng: 127.7298, main: 1, p: "강원특별자치도", label: "강원·춘천"},
+      {n: "청주", lat: 36.6424, lng: 127.4890, main: 1, p: "충청북도", label: "충북·청주"}, {n: "홍성", lat: 36.6010, lng: 126.6608, main: 1, p: "충청남도", label: "충남·홍성"},
+      {n: "전주", lat: 35.8242, lng: 127.1480, main: 1, p: "전북특별자치도", label: "전북·전주"}, {n: "무안", lat: 34.9900, lng: 126.4817, main: 1, p: "전라남도", label: "전남·무안"},
+      {n: "안동", lat: 36.5684, lng: 128.7294, main: 1, p: "경상북도", label: "경북·안동"}, {n: "창원", lat: 35.2280, lng: 128.6811, main: 1, p: "경상남도", label: "경남·창원"},
+      {n: "제주시", lat: 33.4996, lng: 126.5312, main: 1, p: "제주특별자치도", label: "제주"},
+      {n: "서귀포", lat: 33.2541, lng: 126.5601, p: "제주특별자치도"}, {n: "성남", lat: 37.4200, lng: 127.1267, p: "경기도"},
+      {n: "고양", lat: 37.6584, lng: 126.8320, p: "경기도"}, {n: "용인", lat: 37.2411, lng: 127.1776, p: "경기도"},
+      {n: "부천", lat: 37.5034, lng: 126.7660, p: "경기도"}, {n: "안산", lat: 37.3219, lng: 126.8309, p: "경기도"},
+      {n: "안양", lat: 37.3943, lng: 126.9568, p: "경기도"}, {n: "남양주", lat: 37.6360, lng: 127.2165, p: "경기도"},
+      {n: "화성", lat: 37.1995, lng: 126.8312, p: "경기도"}, {n: "평택", lat: 36.9921, lng: 127.1129, p: "경기도"},
+      {n: "의정부", lat: 37.7381, lng: 127.0337, p: "경기도"}, {n: "파주", lat: 37.7600, lng: 126.7800, p: "경기도"},
+      {n: "시흥", lat: 37.3800, lng: 126.8030, p: "경기도"}, {n: "김포", lat: 37.6153, lng: 126.7156, p: "경기도"},
+      {n: "광명", lat: 37.4786, lng: 126.8644, p: "경기도"}, {n: "강남", lat: 37.4979, lng: 127.0276, p: "서울특별시"},
+      {n: "홍대", lat: 37.5563, lng: 126.9236, p: "서울특별시"}, {n: "해운대", lat: 35.1631, lng: 129.1636, p: "부산광역시"},
+      {n: "원주", lat: 37.3422, lng: 127.9202, p: "강원특별자치도"}, {n: "강릉", lat: 37.7519, lng: 128.8761, p: "강원특별자치도"},
+      {n: "속초", lat: 38.2070, lng: 128.5918, p: "강원특별자치도"}, {n: "동해", lat: 37.5247, lng: 129.1143, p: "강원특별자치도"},
+      {n: "삼척", lat: 37.4500, lng: 129.1650, p: "강원특별자치도"}, {n: "충주", lat: 36.9910, lng: 127.9259, p: "충청북도"},
+      {n: "제천", lat: 37.1326, lng: 128.1909, p: "충청북도"}, {n: "천안", lat: 36.8151, lng: 127.1139, p: "충청남도"},
+      {n: "아산", lat: 36.7898, lng: 127.0019, p: "충청남도"}, {n: "공주", lat: 36.4465, lng: 127.1190, p: "충청남도"},
+      {n: "서산", lat: 36.7845, lng: 126.4503, p: "충청남도"}, {n: "당진", lat: 36.8930, lng: 126.6290, p: "충청남도"},
+      {n: "보령", lat: 36.3333, lng: 126.6128, p: "충청남도"}, {n: "군산", lat: 35.9676, lng: 126.7369, p: "전북특별자치도"},
+      {n: "익산", lat: 35.9483, lng: 126.9577, p: "전북특별자치도"}, {n: "남원", lat: 35.4164, lng: 127.3904, p: "전북특별자치도"},
+      {n: "목포", lat: 34.8118, lng: 126.3922, p: "전라남도"}, {n: "여수", lat: 34.7604, lng: 127.6622, p: "전라남도"},
+      {n: "순천", lat: 34.9506, lng: 127.4872, p: "전라남도"}, {n: "광양", lat: 34.9407, lng: 127.6959, p: "전라남도"},
+      {n: "나주", lat: 35.0160, lng: 126.7108, p: "전라남도"}, {n: "포항", lat: 36.0190, lng: 129.3435, p: "경상북도"},
+      {n: "경주", lat: 35.8562, lng: 129.2247, p: "경상북도"}, {n: "구미", lat: 36.1195, lng: 128.3446, p: "경상북도"},
+      {n: "김천", lat: 36.1398, lng: 128.1136, p: "경상북도"}, {n: "영주", lat: 36.8057, lng: 128.6239, p: "경상북도"},
+      {n: "울릉", lat: 37.4844, lng: 130.9057, p: "경상북도"}, {n: "진주", lat: 35.1800, lng: 128.1076, p: "경상남도"},
+      {n: "김해", lat: 35.2285, lng: 128.8894, p: "경상남도"}, {n: "양산", lat: 35.3350, lng: 129.0373, p: "경상남도"},
+      {n: "거제", lat: 34.8806, lng: 128.6211, p: "경상남도"}, {n: "통영", lat: 34.8544, lng: 128.4331, p: "경상남도"},
+      {n: "사천", lat: 35.0036, lng: 128.0640, p: "경상남도"}, {n: "밀양", lat: 35.5038, lng: 128.7466, p: "경상남도"},
+    ];
+
+    // 한글 → 영문 (국어의 로마자 표기법, 받침/연음 규칙은 단순화)
+    const R_L = ["g","kk","n","d","tt","r","m","b","pp","s","ss","","j","jj","ch","k","t","p","h"];
+    const R_V = ["a","ae","ya","yae","eo","e","yeo","ye","o","wa","wae","oe","yo","u","wo","we","wi","yu","eu","ui","i"];
+    const R_T = ["","k","k","ks","n","nj","nh","t","l","lk","lm","lb","ls","lt","lp","lh","m","p","ps","t","t","ng","t","t","k","t","p","t"];
+    function romanize(s) {
+      let out = "";
+      for (const ch of s) {
+        const c = ch.charCodeAt(0) - 0xAC00;
+        out += (c >= 0 && c <= 11171) ? R_L[Math.floor(c / 588)] + R_V[Math.floor((c % 588) / 28)] + R_T[c % 28] : ch;
+      }
+      return out.charAt(0).toUpperCase() + out.slice(1);
+    }
+    const hasHangul = s => /[가-힣]/.test(s);
+    const stripSuffix = s => s.length >= 3 ? s.replace(/(특별시|광역시|시|군|구)$/, "") : s;
+
+    async function geocode(name) {
+      const u = "https://geocoding-api.open-meteo.com/v1/search?name=" + encodeURIComponent(name)
+        + "&count=6&language=ko&countryCode=KR";
+      const r = await fetch(u);
+      if (!r.ok) return [];
+      return ((await r.json()).results || []).map(x => ({
+        n: x.name, lat: x.latitude, lng: x.longitude, p: [x.admin2, x.admin1].filter(Boolean).join(" ")}));
+    }
+
+    let searchMarker = null, sgItems = [], sgSeq = 0, sgTimer = null, hl = -1, usedRoman = "";
+
+    function renderSg(extra) {
+      const ul = $("sg");
+      if (!sgItems.length && !extra) { ul.style.display = "none"; return; }
+      ul.innerHTML = sgItems.map((c, i) =>
+        `<li data-i="${i}" class="${i === hl ? "hl" : ""}"><span>${c.n}</span><small>${c.p || ""}</small></li>`).join("")
+        + (extra ? `<li class="note">${extra}</li>` : "");
+      ul.style.display = "block";
+      ul.querySelectorAll("li[data-i]").forEach(li =>
+        li.onmousedown = e => { e.preventDefault(); pickPlace(sgItems[+li.dataset.i]); });
+    }
+
+    function onType() {
+      const q = $("q").value.trim();
+      hl = -1;
+      if (!q) { sgItems = []; renderSg(); return; }
+      // 1) 내장 목록: 첫 글자부터 바로 자동완성
+      const starts = CITIES.filter(c => c.n.startsWith(q) || (c.p || "").startsWith(q));
+      const incl = CITIES.filter(c => !starts.includes(c) && c.n.includes(q));
+      sgItems = [...starts, ...incl].slice(0, 7);
+      renderSg();
+      // 2) 2글자 이상이면 Open-Meteo 지명 검색 (한글로 안 나오면 영문으로 바꿔 다시 검색)
+      clearTimeout(sgTimer);
+      if (q.length < 2) return;
+      const seq = ++sgSeq;
+      sgTimer = setTimeout(async () => {
+        try {
+          const names = [q];
+          usedRoman = "";
+          if (hasHangul(q)) { usedRoman = romanize(stripSuffix(q)); names.push(usedRoman); }
+          const found = (await Promise.all(names.map(geocode))).flat();
+          if (seq !== sgSeq) return;           // 더 새로운 입력이 있으면 버림
+          const seen = new Set(sgItems.map(c => c.lat.toFixed(2) + "," + c.lng.toFixed(2)));
+          found.forEach(c => {
+            const k = c.lat.toFixed(2) + "," + c.lng.toFixed(2);
+            if (!seen.has(k)) { seen.add(k); sgItems.push(c); }
+          });
+          sgItems = sgItems.slice(0, 10);
+          renderSg(usedRoman && found.length ? `🔤 한글 "${q}" → 영문 "${usedRoman}" 로도 검색함` : (!sgItems.length ? "검색 결과 없음" : ""));
+        } catch (_) { renderSg(sgItems.length ? "" : "검색 실패 (인터넷 확인)"); }
+      }, 350);
+    }
+
+    function pickPlace(c) {
+      if (!c) return;
+      $("q").value = c.n; $("sg").style.display = "none"; sgItems = [];
+      loadWeather([c.lat, c.lng], c.n);
+      if (!map) return;
+      if (searchMarker) searchMarker.remove();
+      searchMarker = L.marker([c.lat, c.lng], {title: c.n, icon: L.divIcon({className: "", iconSize: null,
+        iconAnchor: [15, 30], html: '<div class="sp">📍</div>'})}).addTo(map);
+      map.flyTo([c.lat, c.lng], natOn ? Math.max(map.getZoom(), 8) : 11, {duration: .8});
+      $("map").scrollIntoView({behavior: "smooth", block: "center"});
+    }
+
+    $("q").addEventListener("input", onType);
+    $("q").addEventListener("focus", onType);
+    $("q").addEventListener("blur", () => setTimeout(() => $("sg").style.display = "none", 150));
+    $("q").addEventListener("keydown", e => {
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        hl = Math.max(0, Math.min(sgItems.length - 1, hl + (e.key === "ArrowDown" ? 1 : -1)));
+        renderSg();
+      } else if (e.key === "Enter") {
+        e.preventDefault();
+        pickPlace(sgItems[hl >= 0 ? hl : 0]);
+      }
+    });
+
+    // ───────── 전국 날씨 지도: 17개 시·도 날씨를 한 번의 호출로 ─────────
+    let natOn = false, natLayer = null;
+    $("natBtn").onclick = async () => {
+      if (!map) return;
+      natOn = !natOn;
+      $("natBtn").classList.toggle("on", natOn);
+      if (!natOn) {
+        if (natLayer) { natLayer.remove(); natLayer = null; }
+        drawMarkers(); map.setView([33.38, 126.55], 9);
+        return;
+      }
+      Object.values(markers).forEach(m => m.remove());
+      const mains = CITIES.filter(c => c.main);
+      const url = "https://api.open-meteo.com/v1/forecast?latitude=" + mains.map(c => c.lat).join(",")
+        + "&longitude=" + mains.map(c => c.lng).join(",")
+        + "&current=temperature_2m,weather_code&timezone=Asia%2FSeoul";
+      try {
+        const r = await fetch(url);
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        const arr = await r.json();
+        natLayer = L.layerGroup().addTo(map);
+        mains.forEach((c, i) => {
+          const cur = arr[i].current, [ic] = wmo(cur.weather_code);
+          L.marker([c.lat, c.lng], {title: c.n, icon: L.divIcon({className: "", iconSize: null, iconAnchor: [36, 22],
+            html: `<div class="wpin">${ic} ${Math.round(cur.temperature_2m)}°<small>${c.label || c.n}</small></div>`})})
+            .on("click", () => pickPlace(c)).addTo(natLayer);
+        });
+        map.fitBounds([[33.0, 125.9], [38.7, 130.3]]);
+      } catch (e) {
+        natOn = false; $("natBtn").classList.remove("on"); drawMarkers();
+        alert("전국 날씨를 불러오지 못함: " + e.message);
+      }
+    };
+
     loadWeather(JEJU_CITY, "제주시");   // 처음에는 제주시 날씨 (미세먼지와 별개로 불러온다)
     load();
   </script>
