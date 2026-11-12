@@ -63,7 +63,27 @@
       padding:18px;margin-top:18px;line-height:1.6}
     .err code{background:#ffe6e1;padding:1px 6px;border-radius:6px}
     footer{text-align:center;color:var(--sub);font-size:12px;padding:0 0 30px}
+
+    /* 지도 + 상세 */
+    .mapwrap{display:grid;gap:14px;margin-top:18px;grid-template-columns:1fr}
+    @media(min-width:860px){.mapwrap{grid-template-columns:1.6fr 1fr}}
+    #map{height:430px;border-radius:20px;border:1px solid var(--line);
+      box-shadow:0 8px 24px rgba(20,60,120,.08);z-index:0}
+    #detail .hint{background:var(--card);border:1px dashed var(--line);border-radius:18px;
+      padding:40px 18px;text-align:center;color:var(--sub);line-height:1.8}
+    #detail .card:hover{transform:none;box-shadow:none}
+    .pin{min-width:38px;height:38px;padding:0 6px;border-radius:19px;color:#fff;font-weight:800;
+      font-size:14px;display:grid;place-items:center;border:3px solid #fff;
+      box-shadow:0 3px 10px rgba(0,0,0,.35);transition:.15s;white-space:nowrap}
+    .pin.sel{transform:scale(1.25);border-color:#18232f}
+    .pin small{font-size:10px;font-weight:600;margin-left:2px;opacity:.9}
+    .lbl{background:#fff;border:1px solid var(--line);border-radius:8px;font-weight:700;
+      padding:2px 7px;font-size:12px;color:var(--ink);box-shadow:none}
+    .card[data-st]{cursor:pointer}
+    .go{margin-top:8px;font-size:11.5px;color:var(--g1)}
   </style>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 </head>
 <body>
   <header>
@@ -73,6 +93,10 @@
 
   <main>
     <section class="summary" id="summary"></section>
+    <section class="mapwrap">
+      <div id="map"></div>
+      <aside id="detail"><div class="hint">🗺️ 지도에서 <b>지역(원)</b>을 클릭하면<br>그 지역의 미세먼지를 보여 드려요.</div></aside>
+    </section>
     <div class="tools" id="tools"></div>
     <div id="view" class="state">불러오는 중…</div>
   </main>
@@ -131,10 +155,17 @@
       if (sortBy === "name") list.sort((a, b) => a.station_name.localeCompare(b.station_name, "ko"));
       else list.sort((a, b) => (b[sortBy] ?? -1) - (a[sortBy] ?? -1));
       $("view").className = "grid";
-      $("view").innerHTML = list.map(r => {
-        const a = g(r.pm10_grade), b = g(r.pm25_grade);
-        return `<article class="card" style="--c:${a.c}">
-          <div class="top"><span class="name">${r.station_name}</span>
+      $("view").innerHTML = list.map(r =>
+        `<article class="card" data-st="${r.station_name}" style="--c:${g(r.pm10_grade).c}">${cardBody(r)}
+          ${COORDS[r.station_name] ? `<div class="go">📍 클릭하면 지도에서 보기</div>` : ""}</article>`).join("");
+      $("view").querySelectorAll(".card[data-st]").forEach(el =>
+        el.onclick = () => { select(el.dataset.st, true); $("map").scrollIntoView({behavior: "smooth", block: "center"}); });
+    }
+
+    // 카드 한 장의 내용 (목록과 지도 상세 패널에서 함께 사용)
+    function cardBody(r) {
+      const a = g(r.pm10_grade), b = g(r.pm25_grade);
+      return `<div class="top"><span class="name">${r.station_name}</span>
             <span class="pill" style="background:${a.c}">${a.t}</span></div>
           <div class="two">
             <div class="m"><div class="l">미세먼지 PM10</div>
@@ -147,8 +178,60 @@
           <div class="sub"><span>오존 ${fmt(r.o3)}</span><span>NO₂ ${fmt(r.no2)}</span>
             <span>CO ${fmt(r.co)}</span><span>SO₂ ${fmt(r.so2)}</span></div>
           ${forecastHtml(r.station_name)}
-          <div class="time">🕒 ${r.data_time}</div></article>`;
-      }).join("");
+          <div class="time">🕒 ${r.data_time}</div>`;
+    }
+
+    // ───────── 지도 (Leaflet + OpenStreetMap) ─────────
+    // 측정소 위치는 동네 중심 근처의 대략적인 좌표입니다 (정밀 측정소 좌표 아님).
+    const COORDS = {
+      "제주항": [33.5170, 126.5320], "이도동": [33.4990, 126.5350], "연동": [33.4880, 126.4980],
+      "노형로": [33.4850, 126.4730], "화북동": [33.5300, 126.5750], "조천읍": [33.5440, 126.6360],
+      "애월읍": [33.4620, 126.3280], "한림읍": [33.4120, 126.2650], "고산리": [33.2935, 126.1630],
+      "대정읍": [33.2240, 126.2530], "강정동": [33.2420, 126.4770], "동홍동": [33.2560, 126.5700],
+      "남원읍": [33.2780, 126.7170], "성산읍": [33.4590, 126.9340],
+    };
+    let map = null, markers = {}, selected = null;
+
+    function initMap() {
+      if (map || !window.L) return;
+      map = L.map("map", {scrollWheelZoom: false}).setView([33.38, 126.55], 9);
+      L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        maxZoom: 18, attribution: "© OpenStreetMap contributors"}).addTo(map);
+      map.on("focus", () => map.scrollWheelZoom.enable());
+      map.on("blur", () => map.scrollWheelZoom.disable());
+    }
+
+    function pinIcon(r, sel) {
+      const a = g(r.pm10_grade);
+      return L.divIcon({className: "", iconSize: null, iconAnchor: [20, 20],
+        html: `<div class="pin ${sel ? "sel" : ""}" style="background:${a.c}">${fmt(r.pm10)}</div>`});
+    }
+
+    function drawMarkers() {
+      initMap();
+      if (!map) { $("map").innerHTML = `<div class="state">지도를 불러오지 못했습니다 (인터넷 연결 확인)</div>`; return; }
+      Object.values(markers).forEach(m => m.remove());
+      markers = {};
+      rows.forEach(r => {
+        const c = COORDS[r.station_name];
+        if (!c) return;
+        const m = L.marker(c, {icon: pinIcon(r, r.station_name === selected), title: r.station_name}).addTo(map);
+        m.bindTooltip(r.station_name, {direction: "top", offset: [0, -18], className: "lbl"});
+        m.on("click", () => select(r.station_name, false));
+        markers[r.station_name] = m;
+      });
+      if (selected) select(selected, false);
+    }
+
+    function select(name, fly) {
+      const r = rows.find(x => x.station_name === name);
+      if (!r) return;
+      selected = name;
+      Object.entries(markers).forEach(([n, m]) =>
+        m.setIcon(pinIcon(rows.find(x => x.station_name === n), n === name)));
+      $("detail").innerHTML = `<article class="card" style="--c:${g(r.pm10_grade).c}">${cardBody(r)}</article>`;
+      const c = COORDS[name];
+      if (c && map) fly ? map.flyTo(c, 11, {duration: .8}) : map.panTo(c);
     }
 
     // 예측 영역: 최근 기록(실선) + 선형회귀 예측(점선) 미니 그래프
@@ -185,7 +268,7 @@
           const fr = await fetch(API_BASE + "/air/forecast?hours=3");
           if (fr.ok) forecast = (await fr.json()).stations || {};
         } catch (_) { forecast = {}; }
-        summary(); tools(); cards();
+        summary(); tools(); cards(); drawMarkers();
       } catch (e) {
         $("view").className = "";
         $("view").innerHTML = `<div class="err"><b>데이터를 불러오지 못했습니다.</b><br>
